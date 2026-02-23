@@ -1,0 +1,1010 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WeatherMatrix — Multi-Model Forecast Comparison</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow+Condensed:wght@300;400;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:#0a0d12; --bg2:#0f1318; --bg3:#151b24; --panel:#111820;
+  --border:#1e2d3d; --border2:#243447;
+  --amber:#f0a500; --amber2:#ffc94d; --amber-dim:rgba(240,165,0,0.12);
+  --cyan:#00d4e8; --green:#3dd68c; --red:#f25757;
+  --blue:#4da6ff; --purple:#b97bff; --orange:#ff7b45;
+  --text:#c8d8e8; --text-dim:#6a8099; --text-bright:#e8f4ff;
+  --mono:'Share Tech Mono',monospace; --sans:'Barlow Condensed',sans-serif;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:16px;min-height:100vh;overflow-x:hidden}
+body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(rgba(30,45,61,.3)1px,transparent 1px),linear-gradient(90deg,rgba(30,45,61,.3)1px,transparent 1px);background-size:40px 40px;pointer-events:none;z-index:0}
+.wrap{position:relative;z-index:1;max-width:1400px;margin:0 auto;padding:24px 20px 60px}
+
+/* HEADER */
+header{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:32px;padding-bottom:20px;border-bottom:1px solid var(--border)}
+.logo{display:flex;align-items:baseline;gap:10px}
+.logo-mark{font-family:var(--mono);font-size:11px;color:var(--amber);letter-spacing:.15em;padding:3px 8px;border:1px solid var(--amber);border-radius:2px;background:var(--amber-dim)}
+.logo h1{font-family:var(--sans);font-size:36px;font-weight:700;letter-spacing:.05em;color:var(--text-bright);line-height:1}
+.logo h1 span{color:var(--amber)}
+.header-right{font-family:var(--mono);font-size:11px;color:var(--text-dim);text-align:right;line-height:1.8}
+.header-right .live{color:var(--green)}
+
+/* CONTROLS */
+.controls{display:grid;grid-template-columns:1fr auto auto;gap:12px;margin-bottom:12px;align-items:end}
+.field{display:flex;flex-direction:column;gap:6px}
+.field label{font-family:var(--mono);font-size:10px;letter-spacing:.15em;color:var(--amber);text-transform:uppercase}
+.field input,.field select{background:var(--panel);border:1px solid var(--border2);color:var(--text-bright);font-family:var(--sans);font-size:17px;padding:10px 14px;border-radius:4px;outline:none;transition:border-color .2s;width:100%}
+.field input:focus,.field select:focus{border-color:var(--amber);box-shadow:0 0 0 2px rgba(240,165,0,.12)}
+.field input::placeholder{color:var(--text-dim)}
+.field select option{background:var(--bg3)}
+.btn-fetch{background:var(--amber);color:#0a0d12;border:none;font-family:var(--sans);font-size:17px;font-weight:700;letter-spacing:.08em;padding:10px 28px;border-radius:4px;cursor:pointer;transition:background .2s;white-space:nowrap;align-self:end}
+.btn-fetch:hover{background:var(--amber2)}
+.btn-fetch:disabled{background:#4a3d0a;color:#7a6a2a;cursor:not-allowed}
+
+/* UNIT TOGGLE */
+.unit-toggle{display:flex;align-items:center;gap:8px;margin-bottom:16px;font-family:var(--mono);font-size:11px;color:var(--text-dim)}
+.unit-btn{background:var(--panel);border:1px solid var(--border2);color:var(--text-dim);font-family:var(--mono);font-size:11px;padding:4px 12px;border-radius:3px;cursor:pointer;transition:all .15s}
+.unit-btn.active{background:var(--amber-dim);border-color:var(--amber);color:var(--amber)}
+
+/* STATUS */
+#status-bar{font-family:var(--mono);font-size:12px;color:var(--text-dim);padding:8px 14px;background:var(--bg2);border:1px solid var(--border);border-radius:4px;margin-bottom:16px;min-height:34px;display:flex;align-items:center;gap:8px}
+#status-bar .dot{width:6px;height:6px;border-radius:50%;background:var(--text-dim);flex-shrink:0}
+#status-bar.loading .dot{background:var(--amber);animation:blink .8s infinite}
+#status-bar.success .dot{background:var(--green)}
+#status-bar.error   .dot{background:var(--red)}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+
+/* SUGGESTIONS */
+.location-wrapper{position:relative}
+#suggestions{position:absolute;top:calc(100% + 4px);left:0;right:0;background:var(--bg3);border:1px solid var(--border2);border-radius:4px;z-index:100;max-height:220px;overflow-y:auto;display:none}
+#suggestions.open{display:block}
+.suggestion-item{padding:9px 14px;cursor:pointer;font-size:15px;transition:background .15s;border-bottom:1px solid var(--border)}
+.suggestion-item:last-child{border-bottom:none}
+.suggestion-item:hover{background:var(--border)}
+.suggestion-item .sub{color:var(--text-dim);font-size:13px;margin-left:6px}
+
+/* PILLS */
+#progress-wrap{margin-bottom:20px;display:none}
+#progress-wrap.visible{display:block}
+.progress-models{display:flex;flex-wrap:wrap;gap:8px}
+.model-pill{font-family:var(--mono);font-size:10px;padding:4px 10px;border-radius:2px;border:1px solid var(--border2);color:var(--text-dim);background:var(--bg3);transition:all .3s}
+.model-pill.loading{border-color:var(--amber);color:var(--amber);background:var(--amber-dim)}
+.model-pill.success{border-color:var(--green);color:var(--green);background:rgba(61,214,140,.1)}
+.model-pill.failed{border-color:var(--border);color:#3a4a5a;text-decoration:line-through}
+
+/* RESULTS */
+#results{display:none}
+#results.visible{display:block;animation:fadeIn .4s ease}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+
+/* NARRATIVE */
+.narrative-box{background:var(--panel);border:1px solid var(--border2);border-left:3px solid var(--amber);border-radius:6px;padding:20px 24px;margin-bottom:24px;display:flex;gap:18px;align-items:flex-start}
+.narrative-icon{font-size:32px;line-height:1;flex-shrink:0;margin-top:2px}
+.narrative-title{font-family:var(--mono);font-size:10px;letter-spacing:.2em;color:var(--amber);text-transform:uppercase;margin-bottom:8px}
+.narrative-text{font-size:20px;font-weight:400;color:var(--text-bright);line-height:1.5;margin-bottom:8px}
+.narrative-detail{font-family:var(--mono);font-size:11px;color:var(--text-dim);line-height:1.9}
+.narrative-detail span{color:var(--text);margin-right:16px;white-space:nowrap}
+.narrative-warn{color:var(--red);font-family:var(--mono);font-size:11px;margin-top:8px}
+
+/* STAT CARDS */
+.stat-row{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-bottom:24px}
+.stat-card{background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:14px 16px;position:relative;overflow:hidden}
+.stat-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px}
+.stat-card.c-hi::before {background:var(--amber)}
+.stat-card.c-lo::before {background:var(--cyan)}
+.stat-card.c-pr::before {background:var(--blue)}
+.stat-card.c-wi::before {background:var(--green)}
+.stat-card.c-hu::before {background:var(--purple)}
+.stat-card.c-rn::before {background:#4da6ff}
+.stat-card.c-sn::before {background:#b0d4f1}
+.sc-label{font-family:var(--mono);font-size:9px;letter-spacing:.2em;color:var(--text-dim);text-transform:uppercase;margin-bottom:6px}
+.sc-val{font-family:var(--mono);font-size:26px;color:var(--text-bright);line-height:1}
+.sc-val .u{font-size:14px;color:var(--text-dim);margin-left:2px}
+.sc-range{font-family:var(--mono);font-size:11px;color:var(--text-dim);margin-top:4px}
+.sc-agree{font-family:var(--mono);font-size:10px;margin-top:5px}
+.agree-low {color:var(--green)}
+.agree-med {color:var(--amber)}
+.agree-high{color:var(--red)}
+
+/* CHARTS */
+.charts-row{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px}
+.chart-panel{background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:18px 20px}
+.chart-panel h3,.full-chart-panel h3{font-family:var(--mono);font-size:11px;letter-spacing:.2em;color:var(--amber);text-transform:uppercase;margin-bottom:4px}
+.chart-sub{font-family:var(--mono);font-size:10px;color:var(--text-dim);margin-bottom:14px;line-height:1.5}
+.chart-container{position:relative;height:220px}
+.full-chart-panel{background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:20px;margin-bottom:24px}
+.full-chart-container{position:relative;height:260px}
+
+/* TABLE */
+.table-panel{background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:20px;margin-bottom:24px;overflow-x:auto}
+.table-panel h3{font-family:var(--mono);font-size:11px;letter-spacing:.2em;color:var(--amber);text-transform:uppercase;margin-bottom:16px}
+table.data-table{width:100%;border-collapse:collapse;font-size:14px}
+table.data-table thead th{font-family:var(--mono);font-size:10px;letter-spacing:.12em;color:var(--text-dim);text-transform:uppercase;text-align:left;padding:8px 12px;border-bottom:1px solid var(--border2);white-space:nowrap}
+table.data-table tbody tr{border-bottom:1px solid var(--border);transition:background .15s}
+table.data-table tbody tr:hover{background:rgba(255,255,255,.03)}
+table.data-table tbody tr:last-child{border-bottom:none}
+table.data-table tbody td{padding:10px 12px;white-space:nowrap}
+.td-name{font-weight:600;color:var(--text-bright);font-size:15px}
+.td-origin{font-family:var(--mono);font-size:10px;color:var(--text-dim);display:block;margin-top:1px}
+.v-hi{color:var(--amber);font-family:var(--mono);font-size:15px}
+.v-lo{color:var(--cyan);font-family:var(--mono);font-size:15px}
+.v-pr{color:var(--blue);font-family:var(--mono);font-size:15px}
+.v-wi{color:var(--green);font-family:var(--mono);font-size:15px}
+.v-hu{color:var(--purple);font-family:var(--mono);font-size:15px}
+.v-cl{color:#aaa;font-family:var(--mono);font-size:15px}
+.v-uv{color:var(--orange);font-family:var(--mono);font-size:15px}
+.outlier-cell{background:rgba(242,87,87,.08);color:var(--red)!important}
+
+/* FOOTER */
+footer{border-top:1px solid var(--border);padding-top:20px;margin-top:8px;display:flex;justify-content:space-between;align-items:flex-start;gap:20px}
+footer p{font-family:var(--mono);font-size:11px;color:var(--text-dim);line-height:1.7}
+footer a{color:var(--amber);text-decoration:none}
+.legend-row{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end}
+.legend-tag{font-family:var(--mono);font-size:10px;padding:3px 8px;border-radius:2px;background:var(--bg3);border:1px solid var(--border2);color:var(--text-dim)}
+
+/* TOOLTIP */
+
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:var(--bg)}
+::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px}
+
+@media(max-width:900px){
+  .stat-row{grid-template-columns:repeat(3,1fr)}  /* 6→3 */
+  .charts-row{grid-template-columns:1fr}
+  .controls{grid-template-columns:1fr 1fr}
+  .btn-fetch{grid-column:1/-1}
+  header{flex-direction:column;align-items:flex-start;gap:12px}
+}
+@media(max-width:560px){
+  .stat-row{grid-template-columns:1fr 1fr}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="logo">
+    <span class="logo-mark">v3.1</span>
+    <h1>Weather<span>Matrix</span></h1>
+  </div>
+  <div class="header-right">
+    <span class="live">● LIVE DATA</span> — OPEN METEOROLOGICAL MODELS<br>
+    12 INDEPENDENT FORECAST SOURCES — NO SIGN-UP REQUIRED<br>
+    HRRR · GFS · NAM · NBM · ECMWF · ICON · GEM · MORE
+  </div>
+</header>
+
+<div class="controls">
+  <div class="field">
+    <label>Location</label>
+    <div class="location-wrapper">
+      <input type="text" id="location-input" placeholder="City, state, or ZIP code…" autocomplete="off" spellcheck="false"/>
+      <div id="suggestions"></div>
+    </div>
+  </div>
+  <div class="field">
+    <label>Forecast Day</label>
+    <select id="day-select"></select>
+  </div>
+  <button class="btn-fetch" id="fetch-btn" onclick="fetchAllModels()">RUN ANALYSIS</button>
+</div>
+
+<div class="unit-toggle">
+  UNITS:
+  <button class="unit-btn active" id="btn-imperial" onclick="setUnits('imperial')">°F / mph / in</button>
+  <button class="unit-btn"        id="btn-metric"   onclick="setUnits('metric')">°C / km/h / mm</button>
+</div>
+
+<div id="status-bar"><div class="dot"></div><span id="status-text">Enter a location and select a day to begin.</span></div>
+<div id="progress-wrap"><div class="progress-models" id="progress-pills"></div></div>
+
+<div id="results">
+
+  <!-- NARRATIVE SUMMARY -->
+  <div class="narrative-box">
+    <div class="narrative-icon" id="nar-icon">⛅</div>
+    <div>
+      <div class="narrative-title">Forecast Summary</div>
+      <div class="narrative-text" id="nar-text">—</div>
+      <div class="narrative-detail" id="nar-detail"></div>
+      <div class="narrative-warn" id="nar-warn"></div>
+    </div>
+  </div>
+
+  <!-- STAT CARDS -->
+  <div class="stat-row">
+    <div class="stat-card c-hi">
+      <div class="sc-label">Avg High Temp</div>
+      <div class="sc-val" id="s-high">--<span class="u">°F</span></div>
+      <div class="sc-range" id="s-high-range">Range: --</div>
+      <div class="sc-agree" id="s-high-agree">—</div>
+    </div>
+    <div class="stat-card c-lo">
+      <div class="sc-label">Avg Low Temp</div>
+      <div class="sc-val" id="s-low">--<span class="u">°F</span></div>
+      <div class="sc-range" id="s-low-range">Range: --</div>
+      <div class="sc-agree" id="s-low-agree">—</div>
+    </div>
+    <div class="stat-card c-pr">
+      <div class="sc-label">Precip Chance</div>
+      <div class="sc-val" id="s-precip">--<span class="u">%</span></div>
+      <div class="sc-range" id="s-precip-range">Range: --</div>
+      <div class="sc-agree" id="s-precip-agree">—</div>
+    </div>
+    <div class="stat-card c-rn">
+      <div class="sc-label">Avg Rain</div>
+      <div class="sc-val" id="s-rain">--<span class="u">in</span></div>
+      <div class="sc-range" id="s-rain-range">Range: --</div>
+      <div class="sc-agree" id="s-rain-agree">—</div>
+    </div>
+    <div class="stat-card c-sn">
+      <div class="sc-label">Avg Snowfall</div>
+      <div class="sc-val" id="s-snow">--<span class="u">in</span></div>
+      <div class="sc-range" id="s-snow-range">Range: --</div>
+      <div class="sc-agree" id="s-snow-agree">—</div>
+    </div>
+    <div class="stat-card c-wi">
+      <div class="sc-label">Avg Wind Speed</div>
+      <div class="sc-val" id="s-wind">--<span class="u">mph</span></div>
+      <div class="sc-range" id="s-wind-range">Range: --</div>
+      <div class="sc-agree" id="s-wind-agree">—</div>
+    </div>
+    <div class="stat-card c-hu">
+      <div class="sc-label">Avg Humidity</div>
+      <div class="sc-val" id="s-humidity">--<span class="u">%</span></div>
+      <div class="sc-range" id="s-humidity-range">Range: --</div>
+      <div class="sc-agree" id="s-humidity-agree">—</div>
+    </div>
+  </div>
+  <!-- CHARTS ROW -->
+  <div class="charts-row">
+    <div class="chart-panel">
+      <h3 id="title-temp">Temperature Range per Model (°F)</h3>
+      <div class="chart-sub">Floating bar = each model's low→high range. Dashed lines = averages across all models.</div>
+      <div class="chart-container"><canvas id="temp-chart"></canvas></div>
+    </div>
+    <div class="chart-panel">
+      <h3>Precip Probability per Model (%)</h3>
+      <div class="chart-sub">Overall chance of any precipitation (rain OR snow). Orange dashed = average. White dashed = 50% threshold.</div>
+      <div class="chart-container"><canvas id="precip-chart"></canvas></div>
+    </div>
+  </div>
+
+  <div class="full-chart-panel">
+    <h3>Rain vs Snow Amounts — All Models</h3>
+    <div class="chart-sub" style="font-family:var(--mono);font-size:10px;color:var(--text-dim);margin-bottom:14px">
+      Blue bars = rain accumulation (left axis). Light blue bars = snowfall (right axis). Precipitation and snowfall are measured separately.
+    </div>
+    <div class="full-chart-container"><canvas id="snow-chart"></canvas></div>
+  </div>
+
+  <div class="full-chart-panel">
+    <h3 id="title-wind">Wind Speed &amp; Gusts — All Models</h3>
+    <div class="chart-sub" style="font-family:var(--mono);font-size:10px;color:var(--text-dim);margin-bottom:14px">
+      Green = sustained wind. Red = gusts. Dashed lines show averages across all models.
+    </div>
+    <div class="full-chart-container"><canvas id="wind-chart"></canvas></div>
+  </div>
+
+  <!-- HOURLY BREAKDOWN -->
+  <div class="full-chart-panel" id="hourly-panel" style="display:none">
+    <h3 id="hourly-title">Hourly Breakdown — Today</h3>
+    <div class="chart-sub" style="font-family:var(--mono);font-size:10px;color:var(--text-dim);margin-bottom:8px" id="hourly-sub">
+      Shaded band = min/max range across all models. Solid line = average. All times are <strong>local time at the location</strong>.
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+      <div>
+        <div style="font-family:var(--mono);font-size:10px;color:var(--amber);letter-spacing:.15em;margin-bottom:8px">TEMPERATURE (hourly)</div>
+        <div style="position:relative;height:180px"><canvas id="hourly-temp-chart"></canvas></div>
+      </div>
+      <div>
+        <div style="font-family:var(--mono);font-size:10px;color:var(--cyan);letter-spacing:.15em;margin-bottom:8px">PRECIP PROBABILITY (hourly)</div>
+        <div style="position:relative;height:180px"><canvas id="hourly-prob-chart"></canvas></div>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <div>
+        <div style="font-family:var(--mono);font-size:10px;color:var(--blue);letter-spacing:.15em;margin-bottom:8px">RAIN + SNOWFALL (hourly, per-hour accumulation)</div>
+        <div style="position:relative;height:180px"><canvas id="hourly-precip-chart"></canvas></div>
+      </div>
+      <div>
+        <div style="font-family:var(--mono);font-size:10px;color:var(--green);letter-spacing:.15em;margin-bottom:8px">WIND SPEED (hourly)</div>
+        <div style="position:relative;height:180px"><canvas id="hourly-wind-chart"></canvas></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- RAW DATA TABLE -->
+  <div class="table-panel">
+    <h3>Full Raw Data — All Models</h3>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Model</th>
+          <th id="th-hi">High °F</th>
+          <th id="th-lo">Low °F</th>
+          <th>Precip %</th>
+          <th id="th-rn">Rain (in)</th>
+          <th id="th-sn">Snow (in)</th>
+          <th id="th-wi">Wind (mph)</th>
+          <th id="th-gu">Gusts (mph)</th>
+          <th>Humidity %</th>
+          <th>Cloud %</th>
+          <th>UV Index</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+
+</div><!-- #results -->
+
+<footer>
+  <p>
+    Data from <a href="https://open-meteo.com" target="_blank">Open-Meteo</a> — free, open-source weather API. No API key needed.<br>
+    US-priority: HRRR (hourly hi-res), NAM CONUS, NCEP NBM (National Blend of Models), GFS.<br>
+    Global: ECMWF IFS, DWD ICON, Environment Canada GEM, JMA MSM, Météo-France AROME.
+  </p>
+  <div class="legend-row">
+    <span class="legend-tag">HRRR · USA</span><span class="legend-tag">GFS · USA</span>
+    <span class="legend-tag">NAM · USA</span><span class="legend-tag">NBM · USA</span>
+    <span class="legend-tag">ECMWF · EU</span><span class="legend-tag">ICON · DE</span>
+    <span class="legend-tag">GEM · CA</span><span class="legend-tag">JMA · JP</span>
+    <span class="legend-tag">AROME · FR</span><span class="legend-tag">BEST-MATCH</span>
+  </div>
+</footer>
+</div><!-- .wrap -->
+
+<script>
+// ─── MODELS ───────────────────────────────────────────────────
+const MODELS=[
+  {id:'best_match',           name:'Best-Match',       origin:'Auto-selected best available',   color:'#f0a500'},
+  {id:'gfs_seamless',         name:'NOAA GFS',         origin:'Natl Weather Service, USA',       color:'#3dd68c'},
+  {id:'gfs025',               name:'GFS 0.25°',        origin:'Natl Weather Service (hi-res)',   color:'#5debb0'},
+  {id:'hrrr_conus',           name:'NOAA HRRR',        origin:'High-Res Rapid Refresh, USA',     color:'#ff7b45'},
+  {id:'ncep_nbm_conus',       name:'NCEP NBM',         origin:'National Blend of Models, USA',   color:'#ffb347'},
+  {id:'nam_conus',            name:'NOAA NAM',         origin:'North American Mesoscale, USA',   color:'#ff4d8b'},
+  {id:'ecmwf_ifs04',          name:'ECMWF IFS',        origin:'European Centre for MWF, EU',     color:'#00d4e8'},
+  {id:'ecmwf_ifs025',         name:'ECMWF 0.25°',      origin:'European Centre (hi-res)',        color:'#5bc8f5'},
+  {id:'icon_seamless',        name:'DWD ICON',         origin:'Deutscher Wetterdienst, Germany', color:'#4da6ff'},
+  {id:'gem_seamless',         name:'GEM (Canada)',     origin:'Environment Canada',              color:'#b97bff'},
+  {id:'meteofrance_seamless', name:'Météo-France',     origin:'Météo-France AROME/ARPEGE',       color:'#f25757'},
+  {id:'jma_seamless',         name:'JMA MSM',          origin:'Japan Met Agency',                color:'#a8e063'},
+];
+
+// ─── STATE ────────────────────────────────────────────────────
+let selLat=null,selLon=null,selName='';
+let units='imperial';
+let lastResults=[];
+let lastDateStr='';
+let cTemp=null,cPrecip=null,cSnow=null,cWind=null,cHourly=null;
+let geoTimer=null;
+let locUtcOffset=null; // UTC offset in seconds for selected location
+
+// ─── DAY SELECT ───────────────────────────────────────────────
+const DN=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+const MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+// localDateStr: build YYYY-MM-DD from LOCAL time parts (not UTC via toISOString)
+const padZ=n=>String(n).padStart(2,'0');
+function localDateStr(d){return `${d.getFullYear()}-${padZ(d.getMonth()+1)}-${padZ(d.getDate())}`;}
+(function(){
+  const sel=document.getElementById('day-select');
+  for(let i=0;i<7;i++){
+    // Add days using local date arithmetic — avoids UTC rollover
+    const d=new Date(); d.setDate(d.getDate()+i);
+    const lbl=i===0?`Today — ${DN[d.getDay()]} ${d.getDate()} ${MN[d.getMonth()]}`
+             :i===1?`Tomorrow — ${DN[d.getDay()]} ${d.getDate()} ${MN[d.getMonth()]}`
+             :`${DN[d.getDay()]} ${d.getDate()} ${MN[d.getMonth()]}`;
+    const o=document.createElement('option');o.value=i;o.textContent=lbl;sel.appendChild(o);
+  }
+})();
+
+// ─── UNITS ────────────────────────────────────────────────────
+function setUnits(u){
+  units=u;
+  document.getElementById('btn-imperial').classList.toggle('active',u==='imperial');
+  document.getElementById('btn-metric').classList.toggle('active',u==='metric');
+  if(lastResults.length) renderResults(lastResults);
+}
+function conv(v,type){
+  if(v==null) return null;
+  if(units==='imperial'){
+    if(type==='temp')   return v*9/5+32;
+    if(type==='wind')   return v*0.621371;
+    if(type==='precip') return v*0.0393701;  // mm → in
+    if(type==='snow')   return v*0.393701;   // cm → in
+  }
+  return v;
+}
+function ul(type){
+  if(type==='temp')   return units==='imperial'?'°F':'°C';
+  if(type==='wind')   return units==='imperial'?'mph':'km/h';
+  if(type==='precip') return units==='imperial'?'in':'mm';
+  if(type==='snow')   return units==='imperial'?'in':'cm';
+  return '';
+}
+
+// ─── GEOCODING ────────────────────────────────────────────────
+const locInput=document.getElementById('location-input');
+const suggBox=document.getElementById('suggestions');
+locInput.addEventListener('input',()=>{
+  clearTimeout(geoTimer);
+  const q=locInput.value.trim();
+  if(q.length<2){suggBox.classList.remove('open');return;}
+  geoTimer=setTimeout(()=>geoSuggest(q),350);
+});
+locInput.addEventListener('blur',()=>setTimeout(()=>suggBox.classList.remove('open'),200));
+locInput.addEventListener('keydown',e=>{if(e.key==='Enter'){suggBox.classList.remove('open');fetchAllModels();}});
+
+async function geoSearch(q,cc){
+  const r=await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(q)}&count=6&language=en&format=json${cc?'&countryCode='+cc:''}`);
+  const d=await r.json(); return d.results||[];
+}
+async function geoSuggest(q){
+  try{
+    let res=await geoSearch(q,'US');
+    if(!res.length) res=await geoSearch(q,'');
+    if(!res.length){suggBox.classList.remove('open');return;}
+    suggBox.innerHTML='';
+    res.slice(0,6).forEach(r=>{
+      const el=document.createElement('div');
+      el.className='suggestion-item';
+      el.innerHTML=`<strong>${r.name}</strong><span class="sub">${[r.admin1,r.country].filter(Boolean).join(', ')}</span>`;
+      el.addEventListener('mousedown',()=>{
+        selLat=r.latitude;selLon=r.longitude;
+        selName=[r.name,r.admin1,r.country].filter(Boolean).join(', ');
+        locInput.value=selName;suggBox.classList.remove('open');
+      });
+      suggBox.appendChild(el);
+    });
+    suggBox.classList.add('open');
+  }catch{suggBox.classList.remove('open');}
+}
+
+// ─── STATUS / PILLS ───────────────────────────────────────────
+const $=id=>document.getElementById(id);
+function setStatus(msg,type=''){$('status-bar').className=type;$('status-text').textContent=msg;}
+function initPills(){
+  const box=$('progress-pills');box.innerHTML='';
+  $('progress-wrap').classList.add('visible');
+  MODELS.forEach(m=>{
+    const el=document.createElement('div');
+    el.className='model-pill loading';el.id='pill-'+m.id;el.textContent=m.name;
+    box.appendChild(el);
+  });
+}
+function setPill(id,state){const el=$('pill-'+id);if(el)el.className='model-pill '+state;}
+
+// ─── FETCH ────────────────────────────────────────────────────
+async function fetchAllModels(){
+  if(!selLat||!selLon||locInput.value!==selName){
+    const q=locInput.value.trim();
+    if(!q){setStatus('Please enter a location first.','error');return;}
+    setStatus('Resolving location…','loading');
+    try{
+      let res=await geoSearch(q,'US');
+      if(!res.length) res=await geoSearch(q,'');
+      if(!res.length){setStatus(`Could not find "${q}". Try a city name.`,'error');return;}
+      selLat=res[0].latitude;selLon=res[0].longitude;
+      selName=[res[0].name,res[0].admin1,res[0].country].filter(Boolean).join(', ');
+      locInput.value=selName;
+    }catch{setStatus('Network error. Check your internet connection.','error');return;}
+  }
+
+  $('fetch-btn').disabled=true;
+  locUtcOffset=null; // reset for new location
+  initPills();
+
+  const dayOff=parseInt($('day-select').value);
+  const target=new Date();target.setDate(target.getDate()+dayOff);
+  const dateStr=localDateStr(target); // LOCAL date, not UTC — fixes off-by-one after 7pm EST
+
+  setStatus(`Querying ${MODELS.length} forecast models for ${selName}…`,'loading');
+
+  const CORE='temperature_2m_max,temperature_2m_min,rain_sum,snowfall_sum,precipitation_probability_max,windspeed_10m_max,windgusts_10m_max,uv_index_max';
+  const HOURLY='temperature_2m,snowfall,rain,precipitation_probability,windspeed_10m,weathercode';
+  const EXTRA='cloudcover_mean,relative_humidity_2m_mean';
+  const results=[];
+
+  await Promise.all(MODELS.map(async model=>{
+    try{
+      const url=`https://api.open-meteo.com/v1/forecast?latitude=${selLat}&longitude=${selLon}&daily=${CORE}&timezone=auto&models=${model.id}&forecast_days=8`;
+      const resp=await fetch(url);
+      if(!resp.ok) throw new Error('HTTP '+resp.status);
+      const data=await resp.json();
+      if(!data.daily?.time) throw new Error('no data');
+      const di=data.daily.time.indexOf(dateStr);
+      if(di<0) throw new Error('date not found');
+
+      // Capture timezone offset from API for location local time display
+      if(data.utc_offset_seconds!=null && locUtcOffset===null) locUtcOffset=data.utc_offset_seconds;
+
+      const row={
+        model,
+        high:      data.daily.temperature_2m_max?.[di]??null,
+        low:       data.daily.temperature_2m_min?.[di]??null,
+        precipProb:data.daily.precipitation_probability_max?.[di]??null,
+        rainSum:   data.daily.rain_sum?.[di]??null,
+        snowSum:   data.daily.snowfall_sum?.[di]??null,
+        wind:      data.daily.windspeed_10m_max?.[di]??null,
+        gusts:     data.daily.windgusts_10m_max?.[di]??null,
+        uv:        data.daily.uv_index_max?.[di]??null,
+        humidity:null,cloud:null,
+        hourly:null, // filled below
+      };
+
+      // ── Fetch hourly for this model ──
+      try{
+        const hurl=`https://api.open-meteo.com/v1/forecast?latitude=${selLat}&longitude=${selLon}&hourly=${HOURLY}&timezone=auto&models=${model.id}&forecast_days=9`;
+        const hr=await fetch(hurl);
+        if(hr.ok){
+          const hd=await hr.json();
+          if(hd.hourly?.time){
+            // Filter to hours belonging to the selected date (local time, API returns local timestamps)
+            const dayHours={time:[],temp:[],snow:[],rain:[],prob:[],wind:[]};
+            hd.hourly.time.forEach((t,hi)=>{
+              if(t.startsWith(dateStr)){
+                dayHours.time.push(t.slice(11,16)); // "HH:MM"
+                dayHours.temp.push(hd.hourly.temperature_2m?.[hi]??null);
+                dayHours.snow.push(hd.hourly.snowfall?.[hi]??null);
+                dayHours.rain.push(hd.hourly.rain?.[hi]??null);
+                dayHours.prob.push(hd.hourly.precipitation_probability?.[hi]??null);
+                dayHours.wind.push(hd.hourly.windspeed_10m?.[hi]??null);
+              }
+            });
+            if(dayHours.time.length>0) row.hourly=dayHours;
+          }
+        }
+      }catch{}
+      try{
+        const er=await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${selLat}&longitude=${selLon}&daily=${EXTRA}&timezone=auto&models=${model.id}&forecast_days=8`);
+        if(er.ok){
+          const ed=await er.json();
+          if(ed.daily?.time){
+            const ei=ed.daily.time.indexOf(dateStr);
+            if(ei>=0){row.humidity=ed.daily.relative_humidity_2m_mean?.[ei]??null;row.cloud=ed.daily.cloudcover_mean?.[ei]??null;}
+          }
+        }
+      }catch{}
+      results.push(row);
+      setPill(model.id,'success');
+    }catch{setPill(model.id,'failed');}
+  }));
+
+  $('fetch-btn').disabled=false;
+  if(!results.length){setStatus('All model requests failed. Check your internet connection.','error');return;}
+
+  const dLbl=dayOff===0?'Today':dayOff===1?'Tomorrow':`${DN[target.getDay()]} ${target.getDate()} ${MN[target.getMonth()]}`;
+  // Compute location's current local time using UTC offset from API
+  let localTimeStr='';
+  if(locUtcOffset!==null){
+    const locNow=new Date(Date.now()+locUtcOffset*1000);
+    const lh=padZ(locNow.getUTCHours()),lm=padZ(locNow.getUTCMinutes());
+    const ampm=locNow.getUTCHours()<12?'AM':'PM';
+    const h12=locNow.getUTCHours()%12||12;
+    localTimeStr=` — Local time at location: ${h12}:${lm} ${ampm}`;
+  }
+  setStatus(`✓ ${results.length} of ${MODELS.length} models — ${selName} — ${dLbl}${localTimeStr}`,'success');
+  lastResults=results;
+  lastDateStr=dateStr;
+  renderResults(results);
+}
+
+// ─── MATH ─────────────────────────────────────────────────────
+const avg  =a=>{const v=a.filter(x=>x!=null);return v.length?v.reduce((s,x)=>s+x,0)/v.length:null};
+const vmin =a=>{const v=a.filter(x=>x!=null);return v.length?Math.min(...v):null};
+const vmax =a=>{const v=a.filter(x=>x!=null);return v.length?Math.max(...v):null};
+const sprd =a=>{const lo=vmin(a),hi=vmax(a);return lo==null?null:hi-lo};
+const stdDv=a=>{const v=a.filter(x=>x!=null);if(!v.length)return null;const m=avg(v);return Math.sqrt(v.reduce((s,x)=>s+(x-m)**2,0)/v.length)};
+const fmt  =(v,d=1)=>v==null?'—':(+v).toFixed(d);
+
+function quartiles(arr){
+  const v=[...arr.filter(x=>x!=null)].sort((a,b)=>a-b);
+  if(!v.length)return{q1:null,q3:null};
+  return{q1:v[Math.floor(v.length*0.25)],q3:v[Math.floor(v.length*0.75)]};
+}
+function agreeClass(spread,lo,hi){if(spread==null)return '';return spread<=lo?'agree-low':spread<=hi?'agree-med':'agree-high';}
+function agreeLabel(spread,lo,hi){if(spread==null)return '—';return spread<=lo?'HIGH AGREEMENT':spread<=hi?'MODERATE AGREEMENT':'LOW AGREEMENT';}
+
+// ─── NARRATIVE ────────────────────────────────────────────────
+function buildNarrative(results){
+  const highs=results.map(r=>r.high).filter(x=>x!=null);
+  const probs=results.map(r=>r.precipProb).filter(x=>x!=null);
+  const winds=results.map(r=>r.wind).filter(x=>x!=null);
+  const hums =results.map(r=>r.humidity).filter(x=>x!=null);
+  const clouds=results.map(r=>r.cloud).filter(x=>x!=null);
+
+  const avgH=avg(highs),avgL=avg(results.map(r=>r.low).filter(x=>x!=null));
+  const avgP=avg(probs),avgW=avg(winds);
+  const tU=ul('temp'),wU=ul('wind');
+  const iF=units==='imperial';
+  const dH=conv(avgH,'temp'),dL=conv(avgL,'temp'),dW=conv(avgW,'wind');
+
+  let feel='',icon='🌤';
+  if(dH==null)feel='conditions unknown';
+  else if(dH>(iF?95:35)){feel='dangerously hot';icon='🔥';}
+  else if(dH>(iF?85:29)){feel='very hot';icon='☀️';}
+  else if(dH>(iF?75:24)){feel='warm';icon='🌞';}
+  else if(dH>(iF?65:18)){feel='mild';icon='🌤';}
+  else if(dH>(iF?50:10)){feel='cool';icon='🌥';}
+  else if(dH>(iF?32:0)){feel='cold';icon='🧥';}
+  else{feel='freezing';icon='❄️';}
+
+  const avgSnow=avg(results.map(r=>r.snowSum).filter(x=>x!=null));
+  const avgRain=avg(results.map(r=>r.rainSum).filter(x=>x!=null));
+  const snowExpected=avgSnow!=null&&avgSnow>0.1;
+  const rainExpected=avgRain!=null&&avgRain>0.1;
+
+  let precipText='';
+  if(avgP==null)precipText='precipitation data unavailable';
+  else if(snowExpected&&rainExpected){precipText='mixed rain and snow expected';icon='🌨';}
+  else if(snowExpected){
+    const sU=ul('snow');
+    const sVal=fmt(conv(avgSnow,'snow'),1);
+    precipText=`snow expected (~${sVal} ${sU})`;
+    if(icon!=='❄️')icon='🌨';
+  } else if(avgP>=70){precipText='rain is very likely';if(icon==='🌞'||icon==='🌤')icon='🌧';}
+  else if(avgP>=50){precipText='rain is probable';icon='🌦';}
+  else if(avgP>=30){precipText='some chance of rain';if(icon==='☀️')icon='⛅';}
+  else if(avgP>=10)precipText='precipitation is unlikely';
+  else precipText='dry conditions expected';
+
+  const hiStr=dH!=null?fmt(dH,iF?0:1)+tU:'--';
+  const loStr=dL!=null?fmt(dL,iF?0:1)+tU:'--';
+  const text=`A ${feel} day — highs around ${hiStr}, lows near ${loStr}. ${precipText.charAt(0).toUpperCase()+precipText.slice(1)}.`;
+
+  const tSpread=sprd(highs.map(v=>conv(v,'temp')));
+  const lo=iF?5:3,hi=iF?12:7;
+  let warn='';
+  if(tSpread!=null&&tSpread>hi) warn=`⚠ Models disagree on temperature by ${fmt(tSpread,0)}${tU} — treat with caution.`;
+
+  const parts=[];
+  if(avgW!=null)parts.push(`Wind ${fmt(dW,0)} ${wU}`);
+  if(avgP!=null)parts.push(`${fmt(avgP,0)}% precip chance`);
+  if(avgRain!=null&&avgRain>0)parts.push(`Rain ~${fmt(conv(avgRain,'precip'),2)} ${ul('precip')}`);
+  if(avgSnow!=null&&avgSnow>0)parts.push(`Snow ~${fmt(conv(avgSnow,'snow'),1)} ${ul('snow')}`);
+  if(hums.length)parts.push(`~${fmt(avg(hums),0)}% humidity`);
+  if(clouds.length)parts.push(`~${fmt(avg(clouds),0)}% cloud cover`);
+  parts.push(`${results.length} models queried`);
+
+  return{icon,text,detail:parts.map(p=>`<span>${p}</span>`).join(''),warn};
+}
+
+// ─── CHART DEFAULTS ───────────────────────────────────────────
+const CBASE={
+  responsive:true,maintainAspectRatio:false,
+  plugins:{
+    legend:{display:false},
+    tooltip:{
+      backgroundColor:'#0f1318',borderColor:'#1e2d3d',borderWidth:1,
+      titleColor:'#f0a500',bodyColor:'#c8d8e8',
+      titleFont:{family:"'Share Tech Mono',monospace",size:11},
+      bodyFont:{family:"'Barlow Condensed',sans-serif",size:13},
+    }
+  },
+  scales:{
+    x:{ticks:{color:'#6a8099',font:{family:"'Share Tech Mono',monospace",size:9},maxRotation:35},grid:{color:'rgba(30,45,61,0.6)'}},
+    y:{ticks:{color:'#6a8099',font:{family:"'Share Tech Mono',monospace",size:10}},grid:{color:'rgba(30,45,61,0.6)'}},
+  }
+};
+function killCharts(){[cTemp,cPrecip,cSnow,cWind,cHourly].forEach(c=>c&&c.destroy());cTemp=cPrecip=cSnow=cWind=cHourly=null;}
+
+// ─── HOURLY CHART BUILDER ─────────────────────────────────────
+function buildHourlyCharts(results, dateStr, tU, wU){
+  const hModels=results.filter(r=>r.hourly&&r.hourly.time.length>0);
+  const panel=$('hourly-panel');
+  if(!hModels.length){panel.style.display='none';return;}
+  panel.style.display='block';
+
+  const labels=hModels[0].hourly.time;
+  const iF=units==='imperial';
+
+  $('hourly-title').textContent=`Hourly Breakdown — ${dateStr} (local time at ${selName.split(',')[0]})`;
+
+  function hourlyStats(key,type){
+    const n=labels.length;
+    const avgs=[],mins=[],maxs=[];
+    for(let h=0;h<n;h++){
+      const vals=hModels.map(r=>conv(r.hourly[key][h],type)).filter(x=>x!=null);
+      avgs.push(vals.length?vals.reduce((a,b)=>a+b,0)/vals.length:null);
+      mins.push(vals.length?Math.min(...vals):null);
+      maxs.push(vals.length?Math.max(...vals):null);
+    }
+    return{avgs,mins,maxs};
+  }
+
+  const temps=hourlyStats('temp','temp');
+  const winds=hourlyStats('wind','wind');
+  const probs=hourlyStats('prob',null);
+  const snows=hourlyStats('snow',iF?'snow':null);
+  const rains=hourlyStats('rain',iF?'precip':null);
+
+  const HOPTS={
+    responsive:true,maintainAspectRatio:false,
+    animation:{duration:400},
+    plugins:{legend:{display:false},tooltip:{
+      backgroundColor:'#0f1318',borderColor:'#1e2d3d',borderWidth:1,
+      titleColor:'#f0a500',bodyColor:'#c8d8e8',
+      titleFont:{family:"'Share Tech Mono',monospace",size:10},
+      bodyFont:{family:"'Barlow Condensed',sans-serif",size:12},
+    }},
+    scales:{
+      x:{ticks:{color:'#6a8099',font:{family:"'Share Tech Mono',monospace",size:9},maxRotation:0,maxTicksLimit:12},grid:{color:'rgba(30,45,61,0.5)'}},
+      y:{ticks:{color:'#6a8099',font:{family:"'Share Tech Mono',monospace",size:9}},grid:{color:'rgba(30,45,61,0.5)'}},
+    }
+  };
+
+  const isToday=dateStr===localDateStr(new Date());
+  const nowLocal=(isToday&&locUtcOffset!==null)?new Date(Date.now()+locUtcOffset*1000):null;
+  const currentHourStr=nowLocal?`${padZ(nowLocal.getUTCHours())}:00`:null;
+  const nowIdx=currentHourStr?labels.indexOf(currentHourStr):-1;
+
+  function nowPlugin(color){
+    return nowIdx>=0?[{id:'nowLine',afterDraw(chart){
+      const{ctx,chartArea:{top,bottom},scales:{x}}=chart;
+      const xPos=x.getPixelForValue(nowIdx);
+      ctx.save();ctx.beginPath();
+      ctx.strokeStyle=color;ctx.lineWidth=1.5;ctx.setLineDash([4,3]);
+      ctx.moveTo(xPos,top);ctx.lineTo(xPos,bottom);ctx.stroke();
+      ctx.fillStyle=color;ctx.font="9px 'Share Tech Mono',monospace";
+      ctx.fillText('NOW',xPos+3,top+10);ctx.restore();
+    }}]:[];
+  }
+
+  ['hTmp','hProb','hPrcp','hWind'].forEach(k=>{if(window[k]){window[k].destroy();window[k]=null;}});
+
+  // Temperature
+  window.hTmp=new Chart($('hourly-temp-chart').getContext('2d'),{
+    type:'line',
+    data:{labels,datasets:[
+      {data:temps.maxs,backgroundColor:'rgba(240,165,0,0.08)',borderColor:'transparent',fill:'+1',pointRadius:0,tension:0.3,order:3},
+      {data:temps.mins,backgroundColor:'rgba(240,165,0,0.08)',borderColor:'transparent',fill:false,pointRadius:0,tension:0.3,order:3},
+      {label:`Temp (${tU})`,data:temps.avgs,borderColor:'#f0a500',borderWidth:2,pointRadius:0,tension:0.3,fill:false,order:1},
+    ]},
+    options:{...HOPTS,
+      scales:{...HOPTS.scales,y:{...HOPTS.scales.y,title:{display:true,text:tU,color:'#6a8099',font:{size:9}}}},
+      plugins:{...HOPTS.plugins,tooltip:{...HOPTS.plugins.tooltip,callbacks:{label:ctx=>` ${fmt(ctx.raw,iF?0:1)}${tU}`}}}
+    },
+    plugins:nowPlugin('#f0a500'),
+  });
+
+  // Precip probability
+  window.hProb=new Chart($('hourly-prob-chart').getContext('2d'),{
+    type:'bar',
+    data:{labels,datasets:[
+      {type:'bar',label:'Precip %',data:probs.avgs,
+       backgroundColor:probs.avgs.map(p=>p==null?'#33445544':p>=70?'#00d4e888':p>=40?'#4da6ff88':'#3dd68c88'),
+       borderColor:probs.avgs.map(p=>p==null?'#334455':p>=70?'#00d4e8':p>=40?'#4da6ff':'#3dd68c'),
+       borderWidth:1,borderRadius:2},
+    ]},
+    options:{...HOPTS,
+      scales:{...HOPTS.scales,y:{...HOPTS.scales.y,min:0,max:100,title:{display:true,text:'%',color:'#6a8099',font:{size:9}}}},
+      plugins:{...HOPTS.plugins,tooltip:{...HOPTS.plugins.tooltip,callbacks:{label:ctx=>` ${fmt(ctx.raw,0)}%`}}}
+    },
+    plugins:nowPlugin('#00d4e8'),
+  });
+
+  // Rain + Snow
+  const pRainU=ul('precip'),pSnowU=ul('snow');
+  window.hPrcp=new Chart($('hourly-precip-chart').getContext('2d'),{
+    type:'bar',
+    data:{labels,datasets:[
+      {type:'bar',label:`Rain (${pRainU})`,data:rains.avgs,backgroundColor:'#4da6ff88',borderColor:'#4da6ff',borderWidth:1,borderRadius:2,yAxisID:'yR'},
+      {type:'bar',label:`Snow (${pSnowU})`,data:snows.avgs,backgroundColor:'#b0d4f188',borderColor:'#b0d4f1',borderWidth:1,borderRadius:2,yAxisID:'yS'},
+    ]},
+    options:{...HOPTS,
+      plugins:{...HOPTS.plugins,legend:{display:true,labels:{color:'#6a8099',font:{family:"'Share Tech Mono',monospace",size:9},boxWidth:10}}},
+      scales:{
+        x:HOPTS.scales.x,
+        yR:{ticks:{color:'#4da6ff',font:{family:"'Share Tech Mono',monospace",size:9}},grid:{color:'rgba(30,45,61,0.5)'},position:'left',title:{display:true,text:`Rain (${pRainU})`,color:'#4da6ff',font:{size:9}}},
+        yS:{ticks:{color:'#b0d4f1',font:{family:"'Share Tech Mono',monospace",size:9}},grid:{display:false},position:'right',title:{display:true,text:`Snow (${pSnowU})`,color:'#b0d4f1',font:{size:9}}},
+      }
+    },
+    plugins:nowPlugin('#ffffff'),
+  });
+
+  // Wind
+  window.hWind=new Chart($('hourly-wind-chart').getContext('2d'),{
+    type:'line',
+    data:{labels,datasets:[
+      {label:`Wind (${wU})`,data:winds.avgs,borderColor:'#3dd68c',borderWidth:2,pointRadius:0,tension:0.3,fill:false,order:1},
+    ]},
+    options:{...HOPTS,
+      scales:{...HOPTS.scales,y:{...HOPTS.scales.y,title:{display:true,text:wU,color:'#6a8099',font:{size:9}}}},
+      plugins:{...HOPTS.plugins,tooltip:{...HOPTS.plugins.tooltip,callbacks:{label:ctx=>` ${fmt(ctx.raw,0)} ${wU}`}}}
+    },
+    plugins:nowPlugin('#3dd68c'),
+  });
+}
+
+// ─── MAIN RENDER ──────────────────────────────────────────────
+function renderResults(results){
+  try{
+    const tU=ul('temp'),wU=ul('wind'),pU=ul('precip');
+    const iF=units==='imperial';
+    const dT=iF?0:1;
+
+    const highs =results.map(r=>conv(r.high,'temp'));
+    const lows  =results.map(r=>conv(r.low,'temp'));
+    const probs =results.map(r=>r.precipProb);
+    const rains =results.map(r=>conv(r.rainSum,'precip'));
+    const snows =results.map(r=>conv(r.snowSum,'snow'));
+    const winds =results.map(r=>conv(r.wind,'wind'));
+    const gusts =results.map(r=>conv(r.gusts,'wind'));
+    const hums  =results.map(r=>r.humidity);
+    const names =results.map(r=>r.model.name);
+    const colors=results.map(r=>r.model.color);
+
+    // ── Narrative ──
+    const nar=buildNarrative(results);
+    $('nar-icon').textContent=nar.icon;
+    $('nar-text').textContent=nar.text;
+    $('nar-detail').innerHTML=nar.detail;
+    $('nar-warn').textContent=nar.warn;
+
+    // ── Stat cards ──
+    function fillCard(vid,rid,aid,vals,usuffix,lo,hi,d){
+      const a=avg(vals),mn=vmin(vals),mx=vmax(vals),sp=sprd(vals);
+      $(vid).innerHTML=`${fmt(a,d??dT)}<span class="u">${usuffix}</span>`;
+      $(rid).textContent=`Range: ${fmt(mn,d??dT)} – ${fmt(mx,d??dT)}${usuffix}`;
+      $(aid).innerHTML=`<span class="${agreeClass(sp,lo,hi)}">${agreeLabel(sp,lo,hi)}</span>`;
+    }
+    const tLo=iF?5:3,tHi=iF?12:7;
+    const wLo=iF?7:10,wHi=iF?16:25;
+    fillCard('s-high','s-high-range','s-high-agree',highs,tU,tLo,tHi);
+    fillCard('s-low','s-low-range','s-low-agree',lows,tU,tLo,tHi);
+    fillCard('s-precip','s-precip-range','s-precip-agree',probs,'%',15,35,0);
+    fillCard('s-rain','s-rain-range','s-rain-agree',rains,ul('precip'),0.5,1.5,2);
+    fillCard('s-snow','s-snow-range','s-snow-agree',snows,ul('snow'),0.2,1.0,1);
+    fillCard('s-wind','s-wind-range','s-wind-agree',winds,wU,wLo,wHi,0);
+    const hV=hums.filter(x=>x!=null);
+    if(hV.length)fillCard('s-humidity','s-humidity-range','s-humidity-agree',hums,'%',10,25,0);
+    else{$('s-humidity').innerHTML='N/A';$('s-humidity-range').textContent='Not available';$('s-humidity-agree').textContent='—';}
+
+    // ── Table headers ──
+    $('th-hi').textContent=`High ${tU}`;
+    $('th-lo').textContent=`Low ${tU}`;
+    $('th-rn').textContent=`Rain (${pU})`;
+    $('th-sn').textContent=`Snow (${ul('snow')})`;
+    $('th-wi').textContent=`Wind (${wU})`;
+    $('th-gu').textContent=`Gusts (${wU})`;
+    $('title-temp').textContent=`Temperature Range per Model (${tU})`;
+    $('title-wind').textContent=`Wind Speed & Gusts — All Models (${wU})`;
+
+    // ── Table body ──
+    const aH=avg(highs),sdH=stdDv(highs)||1;
+    const aP=avg(probs),sdP=stdDv(probs)||1;
+    const aW=avg(winds),sdW=stdDv(winds)||1;
+    const tbody=$('tbody');tbody.innerHTML='';
+    results.forEach(r=>{
+      const rH=conv(r.high,'temp'),rL=conv(r.low,'temp'),rW=conv(r.wind,'wind'),rG=conv(r.gusts,'wind');
+      const oH=rH!=null&&Math.abs(rH-aH)/sdH>1.5;
+      const oP=r.precipProb!=null&&Math.abs(r.precipProb-aP)/sdP>1.5;
+      const oW=rW!=null&&Math.abs(rW-aW)/sdW>1.5;
+      const tr=document.createElement('tr');
+      tr.innerHTML=`
+        <td><span class="td-name" style="color:${r.model.color}">${r.model.name}</span><span class="td-origin">${r.model.origin}</span></td>
+        <td class="v-hi${oH?' outlier-cell':''}">${fmt(rH,dT)}°</td>
+        <td class="v-lo">${fmt(rL,dT)}°</td>
+        <td class="v-pr${oP?' outlier-cell':''}">${fmt(r.precipProb,0)}%</td>
+        <td class="v-pr">${fmt(conv(r.rainSum,'precip'),2)}</td>
+        <td class="v-cl">${fmt(conv(r.snowSum,'snow'),1)}</td>
+        <td class="v-wi${oW?' outlier-cell':''}">${fmt(rW,0)}</td>
+        <td class="v-wi">${fmt(rG,0)}</td>
+        <td class="v-hu">${fmt(r.humidity,0)}%</td>
+        <td class="v-cl">${fmt(r.cloud,0)}%</td>
+        <td class="v-uv">${fmt(r.uv,1)}</td>`;
+      tbody.appendChild(tr);
+    });
+
+    // ── Charts — MUST include type: 'bar' at top level for mixed charts ──
+    killCharts();
+    const aHighD=avg(highs),aLowD=avg(lows),aProbD=avg(probs),aWindD=avg(winds),aGustD=avg(gusts);
+
+    cTemp=new Chart($('temp-chart').getContext('2d'),{
+      type:'bar', // REQUIRED for mixed charts in Chart.js 4
+      data:{
+        labels:names,
+        datasets:[
+          {type:'bar', label:`Low→High (${tU})`,
+           data:results.map(r=>[conv(r.low,'temp'),conv(r.high,'temp')]),
+           backgroundColor:colors.map(c=>c+'99'),borderColor:colors,borderWidth:1,borderRadius:2,order:2},
+          {type:'line',label:`Avg High`,
+           data:Array(results.length).fill(aHighD),
+           borderColor:'#f0a500',borderWidth:2,borderDash:[6,4],pointRadius:0,tension:0,order:1},
+          {type:'line',label:`Avg Low`,
+           data:Array(results.length).fill(aLowD),
+           borderColor:'#00d4e8',borderWidth:2,borderDash:[6,4],pointRadius:0,tension:0,order:1},
+        ]
+      },
+      options:{...CBASE,
+        plugins:{...CBASE.plugins,
+          legend:{display:true,labels:{color:'#6a8099',font:{family:"'Share Tech Mono',monospace",size:9},boxWidth:10}},
+          tooltip:{...CBASE.plugins.tooltip,callbacks:{label:ctx=>ctx.datasetIndex===0
+            ?` Low: ${fmt(ctx.raw[0],dT)}${tU}  →  High: ${fmt(ctx.raw[1],dT)}${tU}`
+            :` ${ctx.dataset.label}: ${fmt(ctx.raw,dT)}${tU}`}}}
+      }
+    });
+
+    cPrecip=new Chart($('precip-chart').getContext('2d'),{
+      type:'bar', // REQUIRED
+      data:{
+        labels:names,
+        datasets:[
+          {type:'bar', label:'Precip %',
+           data:probs,
+           backgroundColor:probs.map(p=>p==null?'#33445588':p>=70?'#00d4e888':p>=40?'#4da6ff88':'#3dd68c88'),
+           borderColor:     probs.map(p=>p==null?'#334455':  p>=70?'#00d4e8':  p>=40?'#4da6ff':  '#3dd68c'),
+           borderWidth:1,borderRadius:2,order:2},
+          {type:'line',label:'Average',
+           data:Array(results.length).fill(aProbD),
+           borderColor:'#f0a500',borderWidth:2,borderDash:[6,4],pointRadius:0,tension:0,order:1},
+          {type:'line',label:'50% Line',
+           data:Array(results.length).fill(50),
+           borderColor:'rgba(255,255,255,0.25)',borderWidth:1,borderDash:[3,3],pointRadius:0,tension:0,order:1},
+        ]
+      },
+      options:{...CBASE,
+        plugins:{...CBASE.plugins,legend:{display:true,labels:{color:'#6a8099',font:{family:"'Share Tech Mono',monospace",size:9},boxWidth:10}}},
+        scales:{...CBASE.scales,y:{...CBASE.scales.y,min:0,max:100}}
+      }
+    });
+
+    // ── Rain vs Snow amounts chart ──
+    const pRainU=ul('precip'),pSnowU=ul('snow');
+    const aRainD=avg(rains),aSnowD=avg(snows);
+    cSnow=new Chart($('snow-chart').getContext('2d'),{
+      type:'bar',
+      data:{
+        labels:names,
+        datasets:[
+          {type:'bar', label:`Rain (${pRainU})`, data:rains, backgroundColor:'#4da6ff88',borderColor:'#4da6ff',borderWidth:1,borderRadius:2,yAxisID:'yR',order:2},
+          {type:'bar', label:`Snow (${pSnowU})`, data:snows, backgroundColor:'#b0d4f188',borderColor:'#b0d4f1',borderWidth:1,borderRadius:2,yAxisID:'yS',order:2},
+          {type:'line',label:`Avg Rain`,  data:Array(results.length).fill(aRainD), borderColor:'#4da6ff',borderWidth:2,borderDash:[6,4],pointRadius:0,tension:0,yAxisID:'yR',order:1},
+          {type:'line',label:`Avg Snow`,  data:Array(results.length).fill(aSnowD), borderColor:'#b0d4f1',borderWidth:2,borderDash:[6,4],pointRadius:0,tension:0,yAxisID:'yS',order:1},
+        ]
+      },
+      options:{...CBASE,
+        plugins:{...CBASE.plugins,legend:{display:true,labels:{color:'#6a8099',font:{family:"'Share Tech Mono',monospace",size:9},boxWidth:10,padding:10}}},
+        scales:{
+          x:{...CBASE.scales.x},
+          yR:{...CBASE.scales.y,position:'left', title:{display:true,text:`Rain (${pRainU})`,color:'#4da6ff',font:{size:10}}},
+          yS:{ticks:{color:'#b0d4f1',font:{family:"'Share Tech Mono',monospace",size:10}},grid:{display:false},position:'right',title:{display:true,text:`Snow (${pSnowU})`,color:'#b0d4f1',font:{size:10}}},
+        }
+      }
+    });
+
+    cWind=new Chart($('wind-chart').getContext('2d'),{
+      type:'bar', // REQUIRED
+      data:{
+        labels:names,
+        datasets:[
+          {type:'bar', label:`Wind (${wU})`,  data:winds, backgroundColor:'#3dd68c88',borderColor:'#3dd68c',borderWidth:1,borderRadius:2,order:2},
+          {type:'bar', label:`Gusts (${wU})`, data:gusts, backgroundColor:'#f2575766',borderColor:'#f25757',borderWidth:1,borderRadius:2,order:2},
+          {type:'line',label:`Avg Wind`,  data:Array(results.length).fill(aWindD),borderColor:'#3dd68c',borderWidth:2,borderDash:[6,4],pointRadius:0,tension:0,order:1},
+          {type:'line',label:`Avg Gusts`, data:Array(results.length).fill(aGustD),borderColor:'#f25757',borderWidth:2,borderDash:[6,4],pointRadius:0,tension:0,order:1},
+        ]
+      },
+      options:{...CBASE,
+        plugins:{...CBASE.plugins,legend:{display:true,labels:{color:'#6a8099',font:{family:"'Share Tech Mono',monospace",size:9},boxWidth:10,padding:12}}}
+      }
+    });
+
+    // ── Hourly charts ──
+    buildHourlyCharts(results, lastDateStr, tU, wU);
+
+    // ── Show results ──
+    $('results').classList.add('visible');
+    if(window.innerWidth<768) setTimeout(()=>$('results').scrollIntoView({behavior:'smooth',block:'start'}),100);
+
+  } catch(err){
+    console.error('renderResults error:',err);
+    setStatus('Display error: '+err.message+' — check console for details.','error');
+  }
+}
+</script>
+</body>
+</html>
