@@ -764,6 +764,7 @@ function initChart() {
 // ════════════════════════════════════════════════════
 let ws = null, wsBT = null, reconnectTimer = null;
 let liveCandle = null, price24hOpen = null;
+let lastWsMsg = 0;   // epoch ms of last message from either WS stream
 
 async function loadHistory(tf) {
   try {
@@ -808,12 +809,17 @@ function connectKlineWS(tf) {
   ws.onmessage = e => {
     const msg = JSON.parse(e.data);
     const k = msg.k;
-    const candle = { time: k.t / 1000, open: +k.o, high: +k.h, low: +k.l, close: +k.c };
-    const vol = { time: k.t / 1000, value: +k.v, color: +k.c >= +k.o ? '#00d48a33' : '#f43f5e33' };
+    const close = +k.c;
+    const candle = { time: k.t / 1000, open: +k.o, high: +k.h, low: +k.l, close };
+    const vol = { time: k.t / 1000, value: +k.v, color: close >= +k.o ? '#00d48a33' : '#f43f5e33' };
     candleSeries.update(candle);
     volumeSeries.update(vol);
     liveCandle = candle;
-    updateHeaderPrice(+k.c);
+    lastWsMsg = Date.now();
+    // Seed engine price from kline stream so market orders always have a price.
+    // BookTicker gives tighter bid/ask when it works; kline is the reliable fallback.
+    if (!engine.bid) engine.updatePrice(close);
+    updateHeaderPrice(close);
   };
   ws.onclose = () => { setWsStatus(false); reconnectTimer = setTimeout(() => connectKlineWS(currentTf), 5000); };
   ws.onerror = () => { try { ws.close(); } catch(e){} };
@@ -827,6 +833,7 @@ function connectBookTickerWS() {
     const d = JSON.parse(e.data);
     const bid = +d.b, ask = +d.a;
     engine.updatePrice((bid + ask) / 2, bid, ask);
+    lastWsMsg = Date.now();
     document.getElementById('hdr-bid').textContent = '$' + fmt(bid);
     document.getElementById('hdr-ask').textContent = '$' + fmt(ask);
     document.getElementById('hdr-spread').textContent = '$' + (ask - bid).toFixed(2);
@@ -1209,6 +1216,39 @@ function showToast(type, title, msg) {
 //  INIT — runs after password unlock so the chart
 //  element has correct dimensions when initialised
 // ════════════════════════════════════════════════════
+// Poll REST API for latest candle + price when WebSocket goes silent.
+// Runs every 2 s; only fetches if WS has been quiet for >3 s.
+async function pollFallback() {
+  if (Date.now() - lastWsMsg < 3000) return;   // WS is alive, skip
+  try {
+    const r = await fetch(
+      `https://api.binance.us/api/v3/ticker/bookTicker?symbol=BTCUSDT`
+    );
+    const d = await r.json();
+    const bid = +d.bidPrice, ask = +d.askPrice;
+    if (bid && ask) {
+      engine.updatePrice((bid + ask) / 2, bid, ask);
+      document.getElementById('hdr-bid').textContent = '$' + fmt(bid);
+      document.getElementById('hdr-ask').textContent = '$' + fmt(ask);
+      document.getElementById('hdr-spread').textContent = '$' + (ask - bid).toFixed(2);
+    }
+    // Also refresh the live candle
+    const r2 = await fetch(
+      `https://api.binance.us/api/v3/klines?symbol=BTCUSDT&interval=${currentTf}&limit=2`
+    );
+    const klines = await r2.json();
+    if (klines && klines.length) {
+      const k = klines[klines.length - 1];
+      const close = +k[4];
+      const candle = { time: k[0] / 1000, open: +k[1], high: +k[2], low: +k[3], close };
+      const vol   = { time: k[0] / 1000, value: +k[5], color: close >= +k[1] ? '#00d48a33' : '#f43f5e33' };
+      candleSeries.update(candle);
+      volumeSeries.update(vol);
+      updateHeaderPrice(close);
+    }
+  } catch(e) { /* silent — will retry next interval */ }
+}
+
 async function startApp() {
   initChart();
   await Promise.all([loadHistory('1m'), load24hStats()]);
@@ -1217,6 +1257,7 @@ async function startApp() {
   renderAll();
   setInterval(load24hStats, 60000);
   setInterval(renderAll, 1000);
+  setInterval(pollFallback, 2000);   // REST fallback if WS goes quiet
 }
 </script>
 </body>
