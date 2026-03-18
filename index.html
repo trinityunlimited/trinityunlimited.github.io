@@ -260,9 +260,127 @@
 
   /* ── CHART TRADE MARKERS ── */
   .vol-info { font-size: 10px; }
+
+  /* ── LOCK SCREEN ── */
+  #lockscreen {
+    position: fixed; inset: 0; z-index: 9999;
+    background: #07090d;
+    display: flex; align-items: center; justify-content: center;
+    flex-direction: column;
+  }
+  #lockscreen::before {
+    content: '';
+    position: absolute; inset: 0;
+    background:
+      radial-gradient(ellipse 60% 40% at 30% 60%, rgba(245,158,11,.07) 0%, transparent 70%),
+      radial-gradient(ellipse 50% 50% at 75% 35%, rgba(59,130,246,.05) 0%, transparent 70%);
+    pointer-events: none;
+  }
+  .lock-box {
+    position: relative;
+    background: var(--s1);
+    border: 1px solid var(--border2);
+    border-radius: 12px;
+    padding: 48px 44px 40px;
+    width: 360px;
+    box-shadow: 0 32px 80px rgba(0,0,0,.7), 0 0 0 1px rgba(255,255,255,.03);
+    text-align: center;
+  }
+  .lock-icon {
+    width: 52px; height: 52px;
+    background: rgba(245,158,11,.1);
+    border: 1px solid rgba(245,158,11,.25);
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px;
+    margin: 0 auto 20px;
+    box-shadow: 0 0 24px rgba(245,158,11,.1);
+  }
+  .lock-title {
+    font-family: var(--sans); font-size: 18px; font-weight: 800;
+    color: #fff; letter-spacing: 0.02em; margin-bottom: 6px;
+  }
+  .lock-sub {
+    font-size: 11px; color: var(--dim); margin-bottom: 28px; line-height: 1.5;
+  }
+  .lock-input-wrap { position: relative; margin-bottom: 14px; }
+  #lock-input {
+    width: 100%;
+    background: var(--s2);
+    border: 1px solid var(--border2);
+    border-radius: 6px;
+    color: #fff;
+    font-family: var(--mono); font-size: 16px; font-weight: 500;
+    letter-spacing: 0.18em;
+    padding: 13px 44px 13px 16px;
+    outline: none;
+    transition: border-color .2s, box-shadow .2s;
+    text-align: center;
+  }
+  #lock-input:focus {
+    border-color: var(--gold);
+    box-shadow: 0 0 0 3px rgba(245,158,11,.12);
+  }
+  #lock-input.shake {
+    animation: shake .4s ease;
+    border-color: var(--red);
+    box-shadow: 0 0 0 3px rgba(244,63,94,.12);
+  }
+  .lock-eye {
+    position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
+    background: none; border: none; color: var(--dim); cursor: pointer;
+    font-size: 16px; padding: 4px; transition: color .15s;
+  }
+  .lock-eye:hover { color: var(--text); }
+  #lock-btn {
+    width: 100%;
+    font-family: var(--sans); font-size: 13px; font-weight: 700;
+    letter-spacing: 0.06em; text-transform: uppercase;
+    padding: 13px;
+    background: var(--gold); color: #000;
+    border: none; border-radius: 6px; cursor: pointer;
+    transition: background .15s, transform .1s;
+  }
+  #lock-btn:hover { background: #fbbf24; }
+  #lock-btn:active { transform: scale(.98); }
+  #lock-err {
+    font-size: 11px; color: var(--red); margin-top: 10px;
+    min-height: 16px; transition: opacity .2s;
+  }
+  .lock-footer {
+    margin-top: 24px; font-size: 10px; color: var(--dim2);
+    letter-spacing: 0.05em; text-transform: uppercase;
+  }
+  @keyframes shake {
+    0%,100%{ transform: translateX(0) }
+    20%{ transform: translateX(-7px) }
+    40%{ transform: translateX(7px) }
+    60%{ transform: translateX(-5px) }
+    80%{ transform: translateX(5px) }
+  }
+  #app { visibility: hidden; }
 </style>
 </head>
 <body>
+
+<!-- ═══ LOCK SCREEN ═══ -->
+<div id="lockscreen">
+  <div class="lock-box">
+    <div class="lock-icon">🔒</div>
+    <div class="lock-title">BTC Terminal</div>
+    <div class="lock-sub">Private access only.<br>Enter your password to continue.</div>
+    <div class="lock-input-wrap">
+      <input id="lock-input" type="password" placeholder="••••••••"
+             autocomplete="off" autocorrect="off" spellcheck="false"
+             onkeydown="if(event.key==='Enter')unlock()">
+      <button class="lock-eye" onclick="togglePw()" title="Show/hide">👁</button>
+    </div>
+    <button id="lock-btn" onclick="unlock()">Unlock →</button>
+    <div id="lock-err"></div>
+    <div class="lock-footer">BTC Paper Trading Terminal</div>
+  </div>
+</div>
+
 <div id="app">
 
   <!-- ═══ HEADER ═══ -->
@@ -1044,6 +1162,52 @@ function showToast(type, title, msg) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => el.className = '', 3500);
 }
+
+// ════════════════════════════════════════════════════
+//  LOCK SCREEN — password verified via SHA-256 hash
+//  (plaintext password is never stored in this file)
+// ════════════════════════════════════════════════════
+(async () => {
+  // Pre-computed SHA-256 digest — not reversible from source inspection
+  const _v = [
+    0x53,0x2e,0xaa,0xbd,0x95,0x74,0x88,0x0d,
+    0xbf,0x76,0xb9,0xb8,0xcc,0x00,0x83,0x2c,
+    0x20,0xa6,0xec,0x11,0x3d,0x68,0x22,0x99,
+    0x55,0x0d,0x7a,0x6e,0x0f,0x34,0x5e,0x25
+  ];
+
+  async function _h(s) {
+    const buf = await crypto.subtle.digest(
+      'SHA-256',
+      new TextEncoder().encode(s)
+    );
+    return Array.from(new Uint8Array(buf));
+  }
+
+  window.unlock = async function() {
+    const inp = document.getElementById('lock-input');
+    const err = document.getElementById('lock-err');
+    const digest = await _h(inp.value.trim());
+    const match = digest.length === _v.length && digest.every((b, i) => b === _v[i]);
+    if (match) {
+      const ls = document.getElementById('lockscreen');
+      ls.style.transition = 'opacity .4s ease';
+      ls.style.opacity = '0';
+      document.getElementById('app').style.visibility = 'visible';
+      setTimeout(() => ls.remove(), 420);
+    } else {
+      err.textContent = 'Incorrect password.';
+      inp.classList.add('shake');
+      inp.value = '';
+      setTimeout(() => { inp.classList.remove('shake'); err.textContent = ''; }, 1400);
+    }
+  };
+
+  window.togglePw = function() {
+    const inp = document.getElementById('lock-input');
+    inp.type = inp.type === 'password' ? 'text' : 'password';
+  };
+})();
 
 // ════════════════════════════════════════════════════
 //  INIT
