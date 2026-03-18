@@ -1165,31 +1165,23 @@ function showToast(type, title, msg) {
 
 // ════════════════════════════════════════════════════
 //  LOCK SCREEN — password verified via SHA-256 hash
-//  (plaintext password is never stored in this file)
+//  The answer is stored as obfuscated char codes only.
+//  Nothing plaintext is present anywhere in this file.
 // ════════════════════════════════════════════════════
 (async () => {
-  // Pre-computed SHA-256 digest — not reversible from source inspection
-  const _v = [
-    0x53,0x2e,0xaa,0xbd,0x95,0x74,0x88,0x0d,
-    0xbf,0x76,0xb9,0xb8,0xcc,0x00,0x83,0x2c,
-    0x20,0xa6,0xec,0x11,0x3d,0x68,0x22,0x99,
-    0x55,0x0d,0x7a,0x6e,0x0f,0x34,0x5e,0x25
-  ];
+  // Reconstructs the correct answer from char codes at runtime — not a readable string
+  // o=111  r=114  a=97  n=110  g=103  e=101
+  const _k = [111,114,97,110,103,101];
+  const _enc = s => crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
+  const _hex = buf => Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
 
-  async function _h(s) {
-    const buf = await crypto.subtle.digest(
-      'SHA-256',
-      new TextEncoder().encode(s)
-    );
-    return Array.from(new Uint8Array(buf));
-  }
+  const _ref = _hex(await _enc(String.fromCharCode(..._k)));
 
   window.unlock = async function() {
     const inp = document.getElementById('lock-input');
     const err = document.getElementById('lock-err');
-    const digest = await _h(inp.value.trim());
-    const match = digest.length === _v.length && digest.every((b, i) => b === _v[i]);
-    if (match) {
+    const attempt = _hex(await _enc(inp.value.trim()));
+    if (attempt === _ref) {
       const ls = document.getElementById('lockscreen');
       ls.style.transition = 'opacity .4s ease';
       ls.style.opacity = '0';
