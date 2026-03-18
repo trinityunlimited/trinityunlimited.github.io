@@ -451,14 +451,13 @@
     <div class="chart-panel">
       <div class="chart-toolbar">
         <button class="tf-btn active" onclick="setTimeframe('1m',this)">1m</button>
-        <button class="tf-btn" onclick="setTimeframe('3m',this)">3m</button>
         <button class="tf-btn" onclick="setTimeframe('5m',this)">5m</button>
         <button class="tf-btn" onclick="setTimeframe('15m',this)">15m</button>
         <button class="tf-btn" onclick="setTimeframe('30m',this)">30m</button>
         <button class="tf-btn" onclick="setTimeframe('1h',this)">1h</button>
         <button class="tf-btn" onclick="setTimeframe('4h',this)">4h</button>
         <div class="sep"></div>
-        <span style="font-size:10px;color:var(--dim);font-family:var(--sans);font-weight:600">BTC/USDT</span>
+        <span style="font-size:10px;color:var(--dim);font-family:var(--sans);font-weight:600">BTC/USD · Kraken</span>
         <div class="chart-info">
           <span id="ci-o">O —</span>
           <span id="ci-h">H —</span>
@@ -591,7 +590,7 @@
 const CONFIG = {
   initialBalance: 10000,
   fees: { taker: 0.001, maker: 0.0005 },   // 0.10% / 0.05%
-  useRealSpread: true,                       // use live bid/ask from Binance
+  useRealSpread: true,                       // use live bid/ask from Kraken
   fallbackSpreadBps: 3,                      // used if no real spread available
   slippageFactor: 0.00005,                   // market impact per $1000 traded
 };
@@ -760,89 +759,141 @@ function initChart() {
 }
 
 // ════════════════════════════════════════════════════
-//  BINANCE DATA
+//  KRAKEN DATA  (US-accessible, global BTC/USD price)
+//  REST:  api.kraken.com/0/public/...
+//  WS v2: wss://ws.kraken.com/v2
 // ════════════════════════════════════════════════════
-let ws = null, wsBT = null, reconnectTimer = null;
+
+// Map display timeframe labels → Kraken interval minutes
+const TF_MAP = { '1m':1, '5m':5, '15m':15, '30m':30, '1h':60, '4h':240 };
+
+let ws = null, reconnectTimer = null;
 let liveCandle = null, price24hOpen = null;
-let lastWsMsg = 0;   // epoch ms of last message from either WS stream
+let lastWsMsg = 0;
+let krakenWsInterval = 1;   // currently subscribed ohlc interval (minutes)
+
+// Convert Kraken ISO timestamp string to Unix seconds
+function isoToUnix(iso) { return Math.floor(new Date(iso).getTime() / 1000); }
 
 async function loadHistory(tf) {
+  const interval = TF_MAP[tf] || 1;
+  // Fetch enough history: 500 candles worth of seconds back
+  const since = Math.floor(Date.now() / 1000) - interval * 60 * 500;
   try {
-    const r = await fetch(`https://api.binance.us/api/v3/klines?symbol=BTCUSDT&interval=${tf}&limit=500`);
-    const data = await r.json();
-    const candles = data.map(k => ({
-      time: k[0] / 1000,
-      open: +k[1], high: +k[2], low: +k[3], close: +k[4],
+    const r = await fetch(
+      `https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval=${interval}&since=${since}`
+    );
+    const json = await r.json();
+    if (json.error && json.error.length) { console.error('Kraken OHLC error', json.error); return; }
+    const raw = json.result['XXBTZUSD'];
+    // Kraken row: [time, open, high, low, close, vwap, volume, count]
+    const candles = raw.map(k => ({
+      time: +k[0], open: +k[1], high: +k[2], low: +k[3], close: +k[4]
     }));
-    const volumes = data.map(k => ({
-      time: k[0] / 1000, value: +k[5],
-      color: +k[4] >= +k[1] ? '#00d48a33' : '#f43f5e33',
+    const volumes = raw.map(k => ({
+      time: +k[0], value: +k[6],
+      color: +k[4] >= +k[1] ? '#00d48a33' : '#f43f5e33'
     }));
     candleSeries.setData(candles);
     volumeSeries.setData(volumes);
     reapplyMarkers();
-    if (data.length) {
-      const last = data[data.length - 1];
-      updateHeaderPrice(+last[4]);
+    if (raw.length) {
+      const last = raw[raw.length - 1];
+      const close = +last[4];
+      engine.updatePrice(close);
+      updateHeaderPrice(close);
     }
-    return data;
   } catch(e) { console.error('loadHistory', e); }
 }
 
 async function load24hStats() {
   try {
-    const r = await fetch('https://api.binance.us/api/v3/ticker/24hr?symbol=BTCUSDT');
-    const d = await r.json();
-    document.getElementById('hdr-high').textContent = '$' + fmt(+d.highPrice);
-    document.getElementById('hdr-low').textContent = '$' + fmt(+d.lowPrice);
-    document.getElementById('hdr-vol').textContent = fmtVol(+d.volume) + ' BTC';
-    price24hOpen = +d.openPrice;
+    const r = await fetch('https://api.kraken.com/0/public/Ticker?pair=XBTUSD');
+    const json = await r.json();
+    if (json.error && json.error.length) return;
+    const t = json.result['XXBTZUSD'];
+    // t.h = [today_high, 24h_high], t.l = [today_low, 24h_low]
+    // t.v = [today_vol, 24h_vol], t.o = today_open
+    document.getElementById('hdr-high').textContent = '$' + fmt(+t.h[1]);
+    document.getElementById('hdr-low').textContent  = '$' + fmt(+t.l[1]);
+    document.getElementById('hdr-vol').textContent  = fmtVol(+t.v[1]) + ' BTC';
+    price24hOpen = +t.o;
   } catch(e) {}
 }
 
 function connectKlineWS(tf) {
-  if (ws) { try { ws.close(); } catch(e){} }
+  krakenWsInterval = TF_MAP[tf] || 1;
+  if (ws) {
+    if (ws.readyState === WebSocket.OPEN) {
+      // Reuse connection — just switch ohlc subscription
+      ws.send(JSON.stringify({
+        method: 'unsubscribe',
+        params: { channel: 'ohlc', symbol: ['BTC/USD'] }
+      }));
+      ws.send(JSON.stringify({
+        method: 'subscribe',
+        params: { channel: 'ohlc', symbol: ['BTC/USD'], interval: krakenWsInterval }
+      }));
+      return;
+    }
+    try { ws.close(); } catch(e) {}
+  }
   clearTimeout(reconnectTimer);
-  // Use standard WSS port 443 — port 9443 is frequently blocked by firewalls/browsers
-  ws = new WebSocket(`wss://stream.binance.us/ws/btcusdt@kline_${tf}`);
-  ws.onopen = () => { setWsStatus(true); };
-  ws.onmessage = e => {
-    const msg = JSON.parse(e.data);
-    const k = msg.k;
-    const close = +k.c;
-    const candle = { time: k.t / 1000, open: +k.o, high: +k.h, low: +k.l, close };
-    const vol = { time: k.t / 1000, value: +k.v, color: close >= +k.o ? '#00d48a33' : '#f43f5e33' };
-    candleSeries.update(candle);
-    volumeSeries.update(vol);
-    liveCandle = candle;
-    lastWsMsg = Date.now();
-    // Seed engine price from kline stream so market orders always have a price.
-    // BookTicker gives tighter bid/ask when it works; kline is the reliable fallback.
-    if (!engine.bid) engine.updatePrice(close);
-    updateHeaderPrice(close);
+  ws = new WebSocket('wss://ws.kraken.com/v2');
+  ws.onopen = () => {
+    setWsStatus(true);
+    ws.send(JSON.stringify({
+      method: 'subscribe',
+      params: { channel: 'ohlc',   symbol: ['BTC/USD'], interval: krakenWsInterval }
+    }));
+    ws.send(JSON.stringify({
+      method: 'subscribe',
+      params: { channel: 'ticker', symbol: ['BTC/USD'] }
+    }));
   };
-  ws.onclose = () => { setWsStatus(false); reconnectTimer = setTimeout(() => connectKlineWS(currentTf), 5000); };
-  ws.onerror = () => { try { ws.close(); } catch(e){} };
+  ws.onmessage = e => {
+    let msg;
+    try { msg = JSON.parse(e.data); } catch { return; }
+    lastWsMsg = Date.now();
+
+    if (msg.channel === 'ohlc' && msg.data && msg.data.length) {
+      for (const d of msg.data) {
+        const t   = isoToUnix(d.interval_begin);
+        const close = parseFloat(d.close);
+        const candle = { time: t, open: parseFloat(d.open), high: parseFloat(d.high),
+                         low: parseFloat(d.low), close };
+        const vol = { time: t, value: parseFloat(d.volume),
+                      color: close >= parseFloat(d.open) ? '#00d48a33' : '#f43f5e33' };
+        candleSeries.update(candle);
+        volumeSeries.update(vol);
+        liveCandle = candle;
+        if (!engine.bid) engine.updatePrice(close);
+        updateHeaderPrice(close);
+      }
+    }
+
+    if (msg.channel === 'ticker' && msg.data && msg.data.length) {
+      const d   = msg.data[0];
+      const bid = parseFloat(d.bid), ask = parseFloat(d.ask);
+      if (bid && ask) {
+        engine.updatePrice((bid + ask) / 2, bid, ask);
+        document.getElementById('hdr-bid').textContent    = '$' + fmt(bid);
+        document.getElementById('hdr-ask').textContent    = '$' + fmt(ask);
+        document.getElementById('hdr-spread').textContent = '$' + (ask - bid).toFixed(2);
+        renderAll();
+        updatePreview();
+      }
+    }
+  };
+  ws.onclose = () => {
+    setWsStatus(false);
+    reconnectTimer = setTimeout(() => connectKlineWS(currentTf), 5000);
+  };
+  ws.onerror = () => { try { ws.close(); } catch(e) {} };
 }
 
-function connectBookTickerWS() {
-  if (wsBT) { try { wsBT.close(); } catch(e){} }
-  // Use standard WSS port 443
-  wsBT = new WebSocket('wss://stream.binance.us/ws/btcusdt@bookTicker');
-  wsBT.onmessage = e => {
-    const d = JSON.parse(e.data);
-    const bid = +d.b, ask = +d.a;
-    engine.updatePrice((bid + ask) / 2, bid, ask);
-    lastWsMsg = Date.now();
-    document.getElementById('hdr-bid').textContent = '$' + fmt(bid);
-    document.getElementById('hdr-ask').textContent = '$' + fmt(ask);
-    document.getElementById('hdr-spread').textContent = '$' + (ask - bid).toFixed(2);
-    renderAll();
-    updatePreview();
-  };
-  wsBT.onclose = () => setTimeout(connectBookTickerWS, 5000);
-  wsBT.onerror = () => { try { wsBT.close(); } catch(e){} };
-}
+// Keep connectBookTickerWS as a no-op — Kraken combines both streams on one WS
+function connectBookTickerWS() {}
 
 function setWsStatus(live) {
   document.getElementById('ws-dot').className = 'ws-dot' + (live ? ' live' : '');
@@ -1216,37 +1267,42 @@ function showToast(type, title, msg) {
 //  INIT — runs after password unlock so the chart
 //  element has correct dimensions when initialised
 // ════════════════════════════════════════════════════
-// Poll REST API for latest candle + price when WebSocket goes silent.
-// Runs every 2 s; only fetches if WS has been quiet for >3 s.
+// Poll Kraken REST when WebSocket has been quiet > 3 s
 async function pollFallback() {
-  if (Date.now() - lastWsMsg < 3000) return;   // WS is alive, skip
+  if (Date.now() - lastWsMsg < 3000) return;
   try {
-    const r = await fetch(
-      `https://api.binance.us/api/v3/ticker/bookTicker?symbol=BTCUSDT`
-    );
-    const d = await r.json();
-    const bid = +d.bidPrice, ask = +d.askPrice;
-    if (bid && ask) {
+    // Latest ticker for bid/ask
+    const rt = await fetch('https://api.kraken.com/0/public/Ticker?pair=XBTUSD');
+    const jt = await rt.json();
+    if (!jt.error || !jt.error.length) {
+      const t = jt.result['XXBTZUSD'];
+      const bid = +t.b[0], ask = +t.a[0];
       engine.updatePrice((bid + ask) / 2, bid, ask);
-      document.getElementById('hdr-bid').textContent = '$' + fmt(bid);
-      document.getElementById('hdr-ask').textContent = '$' + fmt(ask);
+      document.getElementById('hdr-bid').textContent    = '$' + fmt(bid);
+      document.getElementById('hdr-ask').textContent    = '$' + fmt(ask);
       document.getElementById('hdr-spread').textContent = '$' + (ask - bid).toFixed(2);
     }
-    // Also refresh the live candle
-    const r2 = await fetch(
-      `https://api.binance.us/api/v3/klines?symbol=BTCUSDT&interval=${currentTf}&limit=2`
+    // Latest candle
+    const interval = TF_MAP[currentTf] || 1;
+    const since = Math.floor(Date.now() / 1000) - interval * 60 * 2;
+    const rk = await fetch(
+      `https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval=${interval}&since=${since}`
     );
-    const klines = await r2.json();
-    if (klines && klines.length) {
-      const k = klines[klines.length - 1];
-      const close = +k[4];
-      const candle = { time: k[0] / 1000, open: +k[1], high: +k[2], low: +k[3], close };
-      const vol   = { time: k[0] / 1000, value: +k[5], color: close >= +k[1] ? '#00d48a33' : '#f43f5e33' };
-      candleSeries.update(candle);
-      volumeSeries.update(vol);
-      updateHeaderPrice(close);
+    const jk = await rk.json();
+    if (!jk.error || !jk.error.length) {
+      const raw = jk.result['XXBTZUSD'];
+      if (raw && raw.length) {
+        const k = raw[raw.length - 1];
+        const close = +k[4];
+        const candle = { time: +k[0], open: +k[1], high: +k[2], low: +k[3], close };
+        const vol   = { time: +k[0], value: +k[6],
+                        color: close >= +k[1] ? '#00d48a33' : '#f43f5e33' };
+        candleSeries.update(candle);
+        volumeSeries.update(vol);
+        updateHeaderPrice(close);
+      }
     }
-  } catch(e) { /* silent — will retry next interval */ }
+  } catch(e) { /* silent */ }
 }
 
 async function startApp() {
