@@ -801,7 +801,9 @@ async function load24hStats() {
 
 function connectKlineWS(tf) {
   if (ws) { try { ws.close(); } catch(e){} }
-  ws = new WebSocket(`wss://stream.binance.com:9443/ws/btcusdt@kline_${tf}`);
+  clearTimeout(reconnectTimer);
+  // Use standard WSS port 443 — port 9443 is frequently blocked by firewalls/browsers
+  ws = new WebSocket(`wss://stream.binance.com/ws/btcusdt@kline_${tf}`);
   ws.onopen = () => { setWsStatus(true); };
   ws.onmessage = e => {
     const msg = JSON.parse(e.data);
@@ -813,13 +815,14 @@ function connectKlineWS(tf) {
     liveCandle = candle;
     updateHeaderPrice(+k.c);
   };
-  ws.onclose = () => { setWsStatus(false); reconnectTimer = setTimeout(() => connectKlineWS(currentTf), 3000); };
-  ws.onerror = () => ws.close();
+  ws.onclose = () => { setWsStatus(false); reconnectTimer = setTimeout(() => connectKlineWS(currentTf), 5000); };
+  ws.onerror = () => { try { ws.close(); } catch(e){} };
 }
 
 function connectBookTickerWS() {
   if (wsBT) { try { wsBT.close(); } catch(e){} }
-  wsBT = new WebSocket('wss://stream.binance.com:9443/ws/btcusdt@bookTicker');
+  // Use standard WSS port 443
+  wsBT = new WebSocket('wss://stream.binance.com/ws/btcusdt@bookTicker');
   wsBT.onmessage = e => {
     const d = JSON.parse(e.data);
     const bid = +d.b, ask = +d.a;
@@ -827,10 +830,11 @@ function connectBookTickerWS() {
     document.getElementById('hdr-bid').textContent = '$' + fmt(bid);
     document.getElementById('hdr-ask').textContent = '$' + fmt(ask);
     document.getElementById('hdr-spread').textContent = '$' + (ask - bid).toFixed(2);
-    updateStats();
+    renderAll();   // was erroneously calling undefined updateStats()
     updatePreview();
   };
-  wsBT.onclose = () => setTimeout(connectBookTickerWS, 3000);
+  wsBT.onclose = () => setTimeout(connectBookTickerWS, 5000);
+  wsBT.onerror = () => { try { wsBT.close(); } catch(e){} };
 }
 
 function setWsStatus(live) {
