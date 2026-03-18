@@ -767,7 +767,7 @@ let liveCandle = null, price24hOpen = null;
 
 async function loadHistory(tf) {
   try {
-    const r = await fetch(`https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=${tf}&limit=500`);
+    const r = await fetch(`https://api.binance.us/api/v3/klines?symbol=BTCUSDT&interval=${tf}&limit=500`);
     const data = await r.json();
     const candles = data.map(k => ({
       time: k[0] / 1000,
@@ -790,7 +790,7 @@ async function loadHistory(tf) {
 
 async function load24hStats() {
   try {
-    const r = await fetch('https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT');
+    const r = await fetch('https://api.binance.us/api/v3/ticker/24hr?symbol=BTCUSDT');
     const d = await r.json();
     document.getElementById('hdr-high').textContent = '$' + fmt(+d.highPrice);
     document.getElementById('hdr-low').textContent = '$' + fmt(+d.lowPrice);
@@ -803,7 +803,7 @@ function connectKlineWS(tf) {
   if (ws) { try { ws.close(); } catch(e){} }
   clearTimeout(reconnectTimer);
   // Use standard WSS port 443 — port 9443 is frequently blocked by firewalls/browsers
-  ws = new WebSocket(`wss://stream.binance.com/ws/btcusdt@kline_${tf}`);
+  ws = new WebSocket(`wss://stream.binance.us/ws/btcusdt@kline_${tf}`);
   ws.onopen = () => { setWsStatus(true); };
   ws.onmessage = e => {
     const msg = JSON.parse(e.data);
@@ -822,7 +822,7 @@ function connectKlineWS(tf) {
 function connectBookTickerWS() {
   if (wsBT) { try { wsBT.close(); } catch(e){} }
   // Use standard WSS port 443
-  wsBT = new WebSocket('wss://stream.binance.com/ws/btcusdt@bookTicker');
+  wsBT = new WebSocket('wss://stream.binance.us/ws/btcusdt@bookTicker');
   wsBT.onmessage = e => {
     const d = JSON.parse(e.data);
     const bid = +d.b, ask = +d.a;
@@ -830,7 +830,7 @@ function connectBookTickerWS() {
     document.getElementById('hdr-bid').textContent = '$' + fmt(bid);
     document.getElementById('hdr-ask').textContent = '$' + fmt(ask);
     document.getElementById('hdr-spread').textContent = '$' + (ask - bid).toFixed(2);
-    renderAll();   // was erroneously calling undefined updateStats()
+    renderAll();
     updatePreview();
   };
   wsBT.onclose = () => setTimeout(connectBookTickerWS, 5000);
@@ -1190,7 +1190,7 @@ function showToast(type, title, msg) {
       ls.style.transition = 'opacity .4s ease';
       ls.style.opacity = '0';
       document.getElementById('app').style.visibility = 'visible';
-      setTimeout(() => ls.remove(), 420);
+      setTimeout(() => { ls.remove(); startApp(); }, 420);
     } else {
       err.textContent = 'Incorrect password.';
       inp.classList.add('shake');
@@ -1206,19 +1206,18 @@ function showToast(type, title, msg) {
 })();
 
 // ════════════════════════════════════════════════════
-//  INIT
+//  INIT — runs after password unlock so the chart
+//  element has correct dimensions when initialised
 // ════════════════════════════════════════════════════
-(async () => {
+async function startApp() {
   initChart();
   await Promise.all([loadHistory('1m'), load24hStats()]);
   connectKlineWS('1m');
   connectBookTickerWS();
   renderAll();
-  // Refresh 24h stats every minute
   setInterval(load24hStats, 60000);
-  // Periodic UI refresh for unrealized PnL
   setInterval(renderAll, 1000);
-})();
+}
 </script>
 </body>
 </html>
