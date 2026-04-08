@@ -598,17 +598,48 @@ const CONFIG = {
 // ════════════════════════════════════════════════════
 //  PAPER TRADING ENGINE
 // ════════════════════════════════════════════════════
+const STORAGE_KEY = 'btc_paper_trading_state';
+
 const engine = (() => {
-  let state = {
+  const blank = () => ({
     balance: CONFIG.initialBalance,
     btcHeld: 0,
     avgEntry: 0,
     trades: [],
     feesPaid: 0,
-  };
+  });
 
+  let state = blank();
   let mktPrice = 0, bid = 0, ask = 0;
 
+  // ── Persistence ──────────────────────────────────
+  function save() {
+    try {
+      // Serialise trades: convert Date objects to ISO strings
+      const serial = {
+        ...state,
+        trades: state.trades.map(t => ({ ...t, time: t.time instanceof Date ? t.time.toISOString() : t.time })),
+      };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(serial));
+    } catch(e) { console.warn('Save failed', e); }
+  }
+
+  function load() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return false;
+      const parsed = JSON.parse(raw);
+      // Rehydrate Date objects
+      parsed.trades = (parsed.trades || []).map(t => ({ ...t, time: new Date(t.time) }));
+      state = { ...blank(), ...parsed };
+      return true;
+    } catch(e) {
+      console.warn('Load failed — starting fresh', e);
+      return false;
+    }
+  }
+
+  // ── Price ─────────────────────────────────────────
   function updatePrice(p, b, a) {
     mktPrice = p;
     bid = b || p * (1 - CONFIG.fallbackSpreadBps / 20000);
@@ -617,11 +648,10 @@ const engine = (() => {
 
   function execPrice(side, orderType, limitPx) {
     if (orderType === 'limit') return limitPx;
-    const base = side === 'buy' ? ask : bid;
-    // Simple market impact: larger order = slightly worse fill
-    return base;
+    return side === 'buy' ? ask : bid;
   }
 
+  // ── Orders ────────────────────────────────────────
   function buy(usdtAmt, orderType, limitPx) {
     const fee = CONFIG.fees[orderType === 'limit' ? 'maker' : 'taker'];
     const px = execPrice('buy', orderType, limitPx);
@@ -629,7 +659,6 @@ const engine = (() => {
     const totalCost = usdtAmt * (1 + fee);
     if (totalCost > state.balance) return { ok: false, err: 'Insufficient USDT balance' };
     const qty = usdtAmt / px;
-    // Update avg entry
     const newBtc = state.btcHeld + qty;
     state.avgEntry = newBtc > 0
       ? (state.avgEntry * state.btcHeld + px * qty) / newBtc : px;
@@ -640,14 +669,13 @@ const engine = (() => {
       n: state.trades.length + 1,
       time: new Date(),
       side: 'BUY',
-      orderType,
-      px, qty,
-      usdtAmt,
+      orderType, px, qty, usdtAmt,
       fee: usdtAmt * fee,
       pnl: null,
       equity: getEquity(),
     };
     state.trades.push(trade);
+    save();
     return { ok: true, trade };
   }
 
@@ -668,17 +696,16 @@ const engine = (() => {
       n: state.trades.length + 1,
       time: new Date(),
       side: 'SELL',
-      orderType,
-      px, qty: btcQty,
-      usdtAmt: net,
-      fee: feeAmt,
-      pnl,
+      orderType, px, qty: btcQty,
+      usdtAmt: net, fee: feeAmt, pnl,
       equity: getEquity(),
     };
     state.trades.push(trade);
+    save();
     return { ok: true, trade };
   }
 
+  // ── Calculations ──────────────────────────────────
   function getUnrealPnL() {
     if (!state.btcHeld || !bid) return 0;
     return (bid - state.avgEntry) * state.btcHeld;
@@ -693,18 +720,21 @@ const engine = (() => {
     return (sells.filter(t => t.pnl > 0).length / sells.length) * 100;
   }
   function getBuySellCounts() {
-    const buys = state.trades.filter(t => t.side === 'BUY').length;
+    const buys  = state.trades.filter(t => t.side === 'BUY').length;
     const sells = state.trades.filter(t => t.side === 'SELL').length;
     return { buys, sells };
   }
   function reset() {
-    state = { balance: CONFIG.initialBalance, btcHeld: 0, avgEntry: 0, trades: [], feesPaid: 0 };
+    state = blank();
+    localStorage.removeItem(STORAGE_KEY);
   }
 
-  return { buy, sell, updatePrice, getUnrealPnL, getEquity, getRealPnL, getWinRate,
-           getBuySellCounts, reset,
-           get s() { return state; },
-           get bid() { return bid; }, get ask() { return ask; }, get price() { return mktPrice; } };
+  return { buy, sell, load, updatePrice,
+           getUnrealPnL, getEquity, getRealPnL, getWinRate, getBuySellCounts, reset,
+           get s()     { return state; },
+           get bid()   { return bid; },
+           get ask()   { return ask; },
+           get price() { return mktPrice; } };
 })();
 
 // ════════════════════════════════════════════════════
@@ -1306,14 +1336,30 @@ async function pollFallback() {
 }
 
 async function startApp() {
+  // Restore saved state BEFORE chart init so markers can be replayed
+  const hadSave = engine.load();
+
   initChart();
   await Promise.all([loadHistory('1m'), load24hStats()]);
   connectKlineWS('1m');
   connectBookTickerWS();
+
+  // Rebuild chart markers from saved trades
+  if (hadSave && engine.s.trades.length) {
+    tradeMarkers = engine.s.trades.map(t => ({
+      time: Math.floor(t.time.getTime() / 1000),
+      position: t.side === 'BUY' ? 'belowBar' : 'aboveBar',
+      color:    t.side === 'BUY' ? '#00d48a'  : '#f43f5e',
+      shape:    t.side === 'BUY' ? 'arrowUp'  : 'arrowDown',
+      text:     `${t.side} $${fmt(t.px)}`,
+    }));
+    reapplyMarkers();
+  }
+
   renderAll();
   setInterval(load24hStats, 60000);
   setInterval(renderAll, 1000);
-  setInterval(pollFallback, 2000);   // REST fallback if WS goes quiet
+  setInterval(pollFallback, 2000);
 }
 </script>
 </body>
